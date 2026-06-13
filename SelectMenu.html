@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>점심 메뉴 룰렛</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        .roulette-container { position: relative; width: 100%; max-width: 500px; aspect-ratio: 1/1; margin: 0 auto; }
+        #wheel { width: 100%; height: 100%; border-radius: 50%; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .pin {
+            position: absolute;
+            top: -15px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 0;
+            height: 0;
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-top: 40px solid #EF4444; /* Tailwind red-500 */
+            z-index: 10;
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));
+        }
+        #center-popup {
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            transform: translate(-50%, -50%) scale(0);
+        }
+        #center-popup.show {
+            transform: translate(-50%, -50%) scale(1);
+        }
+        .center-circle {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+            background-color: white;
+            border-radius: 50%;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+            z-index: 5;
+        }
+    </style>
+</head>
+<body class="bg-indigo-50 h-screen w-screen overflow-hidden flex flex-col md:flex-row">
+
+    <!-- 사이드바: 항목 관리 -->
+    <div class="w-full md:w-96 bg-white shadow-xl flex flex-col h-1/3 md:h-full z-20 relative">
+        <div class="p-6 bg-indigo-600 text-white">
+            <h1 class="text-2xl font-bold flex items-center gap-2">
+                <span>🎡</span> 점심메뉴 선택 룰렛
+            </h1>
+            <p class="text-indigo-100 text-sm mt-1">항목을 추가하고 룰렛을 돌려보세요!</p>
+        </div>
+        
+        <div class="p-4 border-b">
+            <form id="add-form" class="flex gap-2">
+                <input type="text" id="new-item" class="flex-1 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="새로운 항목 입력..." autocomplete="off">
+                <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-medium transition-colors whitespace-nowrap">추가</button>
+            </form>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
+            <ul id="item-list" class="space-y-2">
+                <!-- 항목들이 여기에 렌더링 됩니다 -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- 메인: 룰렛 영역 -->
+    <div class="flex-1 flex flex-col items-center justify-center p-4 relative h-2/3 md:h-full">
+        
+        <div class="roulette-container">
+            <div class="pin"></div>
+            <canvas id="wheel" width="1000" height="1000"></canvas>
+            <div class="center-circle"></div>
+            
+            <!-- 당첨 팝업 이미지 -->
+            <div id="center-popup" class="absolute top-1/2 left-1/2 rounded-full shadow-2xl z-20 overflow-hidden flex items-center justify-center bg-white border-8 border-white pointer-events-none" style="width: 240px; height: 240px;">
+                <img id="winner-image" src="" alt="Winner Image" class="w-full h-full object-cover rounded-full" />
+                <div class="absolute inset-0 bg-black bg-opacity-30 rounded-full flex items-end justify-center pb-6">
+                    <span id="winner-text" class="text-white font-bold text-xl drop-shadow-md text-center px-2"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-12">
+            <button id="spin-btn" class="bg-gradient-to-r from-red-500 to-orange-500 hover:from-red-600 hover:to-orange-600 text-white text-2xl font-black py-4 px-12 rounded-full shadow-lg transform transition-transform hover:scale-105 active:scale-95 focus:outline-none ring-4 ring-orange-200">
+                돌리기! 🎲
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // 초기 데이터 세팅
+        let items = ['짜장면', '짬뽕', '잡채밥', '볶음밥', '탕수육'];
+        
+        // 색상 팔레트 (파스텔 & 선명한 톤 섞음)
+        const colors = ['#FF9A9E', '#A1C4FD', '#D4FC79', '#E0C3FC', '#FDD289', '#8EC5FC', '#FFB199', '#B0EACA'];
+
+        // 메뉴별 이미지 매핑 (매핑되지 않은 것은 랜덤 이미지 사용)
+        const imageMap = {
+            '짜장면': 'https://images.unsplash.com/photo-1627907228144-8d9ecb001a1d?auto=format&fit=crop&w=400&q=80',
+            '짬뽕': 'https://images.unsplash.com/photo-1552611052-3ba9d45c6b63?auto=format&fit=crop&w=400&q=80',
+            '잡채밥': 'https://images.unsplash.com/photo-1580651315530-69c8e0026377?auto=format&fit=crop&w=400&q=80',
+            '볶음밥': 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=400&q=80',
+            '탕수육': 'https://images.unsplash.com/photo-1520688329623-64a6e3d231de?auto=format&fit=crop&w=400&q=80'
+        };
+
+        const canvas = document.getElementById('wheel');
+        const ctx = canvas.getContext('2d');
+        const itemListEl = document.getElementById('item-list');
+        const spinBtn = document.getElementById('spin-btn');
+        const addForm = document.getElementById('add-form');
+        const newItemInput = document.getElementById('new-item');
+        const centerPopup = document.getElementById('center-popup');
+        const winnerImage = document.getElementById('winner-image');
+        const winnerText = document.getElementById('winner-text');
+
+        let currentAngle = 0;
+        let isSpinning = false;
+        let animationId;
+
+        // Web Audio API를 이용한 팡파레 효과음
+        let audioCtx;
+        function playFanfare() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            const playNote = (freq, startTime, duration, vol = 0.1) => {
+                const osc = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                osc.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                osc.type = 'triangle';
+                osc.frequency.value = freq;
+                
+                gainNode.gain.setValueAtTime(vol, startTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+                
+                osc.start(startTime);
+                osc.stop(startTime + duration);
+            };
+
+            const now = audioCtx.currentTime;
+            // 도, 파, 솔, 높은 도 (경쾌한 팡파레)
+            playNote(523.25, now, 0.15);       // C5
+            playNote(698.46, now + 0.15, 0.15); // F5
+            playNote(783.99, now + 0.3, 0.15);  // G5
+            playNote(1046.50, now + 0.45, 0.8, 0.2); // C6
+        }
+
+        function renderList() {
+            itemListEl.innerHTML = '';
+            items.forEach((item, index) => {
+                const li = document.createElement('li');
+                li.className = 'flex justify-between items-center bg-white p-3 rounded-lg shadow-sm border border-gray-100';
+                li.innerHTML = `
+                    <span class="font-medium text-gray-700 truncate mr-2 flex-1">${item}</span>
+                    <button class="delete-btn text-red-500 hover:text-red-700 hover:bg-red-50 p-1 rounded transition-colors" data-index="${index}">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                `;
+                itemListEl.appendChild(li);
+            });
+
+            // 삭제 이벤트 리스너 등록
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    if (isSpinning) return;
+                    if (items.length <= 2) {
+                        alert("최소 2개 이상의 항목이 필요합니다.");
+                        return;
+                    }
+                    const idx = e.currentTarget.getAttribute('data-index');
+                    items.splice(idx, 1);
+                    renderList();
+                    drawWheel();
+                    centerPopup.classList.remove('show');
+                });
+            });
+        }
+
+        addForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (isSpinning) return;
+            const val = newItemInput.value.trim();
+            if (val) {
+                items.push(val);
+                newItemInput.value = '';
+                renderList();
+                drawWheel();
+                centerPopup.classList.remove('show');
+            }
+        });
+
+        function drawWheel() {
+            const cw = canvas.width;
+            const ch = canvas.height;
+            const cx = cw / 2;
+            const cy = ch / 2;
+            const radius = Math.min(cw, ch) / 2;
+
+            ctx.clearRect(0, 0, cw, ch);
+
+            if (items.length === 0) return;
+
+            const sliceAngle = 2 * Math.PI / items.length;
+
+            for (let i = 0; i < items.length; i++) {
+                const startAngle = currentAngle + i * sliceAngle;
+                const endAngle = startAngle + sliceAngle;
+
+                // 파이 그리기
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.arc(cx, cy, radius, startAngle, endAngle);
+                ctx.closePath();
+                ctx.fillStyle = colors[i % colors.length];
+                ctx.fill();
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+
+                // 텍스트 그리기
+                ctx.save();
+                ctx.translate(cx, cy);
+                ctx.rotate(startAngle + sliceAngle / 2);
+                ctx.textAlign = 'right';
+                ctx.fillStyle = '#333333';
+                ctx.font = 'bold 45px Pretendard, sans-serif';
+                
+                let text = items[i];
+                if (text.length > 8) text = text.substring(0, 7) + '..';
+                
+                // 텍스트 렌더링 위치 조정 (끝에서 약간 안쪽)
+                ctx.fillText(text, radius - 40, 15);
+                ctx.restore();
+            }
+        }
+
+        function getImageUrl(item) {
+            // 등록된 이미지가 있으면 사용, 없으면 Picsum의 랜덤(하지만 텍스트 기반 시드 고정) 이미지 사용
+            return imageMap[item] || `https://picsum.photos/seed/${encodeURIComponent(item)}/400/400`;
+        }
+
+        function spin() {
+            if (isSpinning || items.length === 0) return;
+            
+            // 시작 시 Audio Context 초기화 (사용자 상호작용 내)
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            isSpinning = true;
+            spinBtn.disabled = true;
+            spinBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            centerPopup.classList.remove('show');
+            
+            // 초기 회전 속도 (랜덤성 부여)
+            let spinVelocity = Math.random() * 0.1 + 0.4;
+            const friction = 0.992; // 감속 비율
+
+            function animate() {
+                currentAngle += spinVelocity;
+                spinVelocity *= friction; // 점점 감속
+
+                drawWheel();
+
+                if (spinVelocity > 0.001) {
+                    animationId = requestAnimationFrame(animate);
+                } else {
+                    cancelAnimationFrame(animationId);
+                    finishSpin();
+                }
+            }
+            animate();
+        }
+
+        function finishSpin() {
+            isSpinning = false;
+            spinBtn.disabled = false;
+            spinBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+
+            // 당첨 항목 계산
+            // 화살표는 위쪽(12시 방향)에 있으므로, 캔버스 기준 각도로는 -Math.PI / 2
+            const sliceAngle = 2 * Math.PI / items.length;
+            
+            // 현재 회전된 각도 상태에서, 상단(-Math.PI/2)이 룰렛판의 어느 위치에 해당하는지 계산
+            // relativeAngle은 룰렛 내부 기준의 각도
+            let relativeAngle = (-Math.PI / 2) - currentAngle;
+            
+            // 각도를 0 ~ 2PI 사이의 양수로 정규화
+            relativeAngle = (relativeAngle % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+            
+            // 인덱스 구하기
+            const winnerIndex = Math.floor(relativeAngle / sliceAngle);
+            const winner = items[winnerIndex];
+
+            showWinner(winner);
+        }
+
+        function showWinner(winner) {
+            // 팡파레 소리 재생
+            playFanfare();
+
+            // 폭죽 효과 (canvas-confetti)
+            confetti({
+                particleCount: 150,
+                spread: 80,
+                origin: { y: 0.6 },
+                colors: ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF']
+            });
+
+            // 중앙 사진 팝업 업데이트
+            winnerImage.src = getImageUrl(winner);
+            winnerText.innerText = winner;
+            
+            // 약간의 딜레이 후 팝업 띄우기
+            setTimeout(() => {
+                centerPopup.classList.add('show');
+            }, 100);
+        }
+
+        spinBtn.addEventListener('click', spin);
+
+        // 초기화
+        renderList();
+        drawWheel();
+    </script>
+</body>
+</html>
